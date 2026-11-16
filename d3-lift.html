@@ -62,8 +62,8 @@ const flat   = Lift3D.project(lifted.points[0].pos,
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
 <script>
-/* ============================ Lift3D library ============================ */
-(function (g) {
+/* ============================ Library ============================ */
+const Lift3D = (() => {
   const L = {};
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -261,13 +261,14 @@ const flat   = Lift3D.project(lifted.points[0].pos,
       setData(d, o) { data = d; Object.assign(st, o); relift(); }
     };
   };
-  g.Lift3D = L;
-})(window);
+  return L;
+})();
+window.Lift3D = Lift3D;
 </script>
 
 <script>
 /* ============================ Demo ============================ */
-(function () {
+(() => {
   function rng(s) { return () => { s |= 0; s = s + 0x6D2B79F5 | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
   const R = rng(7), norm = d3.randomNormal.source(R)(0, 1);
   const origins = [['USA', 1.2, .8], ['Europe', 0, .1], ['Japan', -.9, -.2]];
