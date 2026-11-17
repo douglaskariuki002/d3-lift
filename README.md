@@ -53,7 +53,3 @@ const scene = Lift3D.create(svgElement, rows, {
   size: 'price'
 });
 ```
-
-## License
-
-This project is provided as a demo/example for experimentation and learning.
