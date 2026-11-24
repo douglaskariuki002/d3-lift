@@ -1,7 +1,6 @@
 const Lift3D = (() => {
   const L = {};
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-  const esc = s => String(s).replace(/[&<>\"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
   const isNum = v => v !== null && v !== undefined && v !== '' && typeof v !== 'boolean' && !(v instanceof Date) && isFinite(+v);
 
   function columns(data) {
@@ -107,6 +106,12 @@ const Lift3D = (() => {
     const st = Object.assign({ mode: 'axes', yaw: -0.7, pitch: 0.55, zoom: 1, projection: 'perspective', drop: true, spin: false }, opts);
     let lift, cols;
     const fmt = d3.format('~s');
+    const cubeLayer = svg.append('g').attr('class', 'cube');
+    const dropLayer = svg.append('g').attr('class', 'drop-lines');
+    const gridLayer = svg.append('g').attr('class', 'grid');
+    const pointLayer = svg.append('g').attr('class', 'points');
+    const labelLayer = svg.append('g').attr('class', 'labels');
+    const legendLayer = svg.append('g').attr('class', 'legend');
 
     function colorer() {
       const seq = dom => d3.scaleSequential(d3.interpolateViridis).domain(dom);
@@ -129,47 +134,125 @@ const Lift3D = (() => {
       const P = p => L.project(p, cam), col = colorer();
       const sc = st.size && cols.find(c => c.name === st.size && c.type === 'number') && st.mode !== 'grid'
         ? d3.scaleLinear().domain(d3.extent(data, r => +r[st.size])).range([2.5, 9]) : null;
-      let out = '';
 
       const cs = d3.range(8).map(i => [i & 1 ? 1 : -1, i & 2 ? 1 : -1, i & 4 ? 1 : -1]);
-      d3.range(8).forEach(i => [1, 2, 4].forEach(b => { if (!(i & b)) {
-        const a = P(cs[i]), c = P(cs[i | b]);
-        out += `<line x1="${a.sx}" y1="${a.sy}" x2="${c.sx}" y2="${c.sy}" stroke="var(--line)" stroke-width="1"/>`;
-      } }));
+      const cubeEdges = [];
+      d3.range(8).forEach(i => [1, 2, 4].forEach(b => {
+        if (!(i & b)) cubeEdges.push([cs[i], cs[i | b]]);
+      }));
+      cubeLayer.selectAll('line').data(cubeEdges).join('line')
+        .attr('x1', d => P(d[0]).sx)
+        .attr('y1', d => P(d[0]).sy)
+        .attr('x2', d => P(d[1]).sx)
+        .attr('y2', d => P(d[1]).sy)
+        .attr('stroke', 'var(--line)')
+        .attr('stroke-width', 1);
 
-      const nearest = (fn) => [-1, 1].map(s => [s, P(fn(s)).depth]).sort((a, b) => a[1] - b[1])[0][0];
+      const nearest = fn => [-1, 1].map(s => [s, P(fn(s)).depth]).sort((a, b) => a[1] - b[1])[0][0];
       const sy = nearest(s => [0, s, -1]), sx = nearest(s => [s, 0, -1]);
       const corner = [[-1, -1], [-1, 1], [1, -1], [1, 1]].map(c => [c, P([c[0], c[1], 0]).sx]).sort((a, b) => a[1] - b[1])[0][0];
       const [ax, ay, az] = lift.axes;
-      const lab = (pt, text, cls = 'm', anchor = 'middle') => { const q = P(pt); out += `<text class="${cls}" x="${q.sx}" y="${q.sy}" text-anchor="${anchor}" dominant-baseline="middle">${esc(text)}</text>`; };
-      ax.ticks.forEach(t => lab([t.pos, sy * 1.14, -1.08], t.text));
-      ay.ticks.forEach(t => lab([sx * 1.14, t.pos, -1.08], t.text));
-      az.ticks.forEach(t => lab([corner[0] * 1.1, corner[1] * 1.1, t.pos], t.text, 'm', 'end'));
-      lab([0, sy * 1.45, -1.2], ax.label, 'ax'); lab([sx * 1.5, 0, -1.2], ay.label, 'ax');
-      lab([corner[0] * 1.2, corner[1] * 1.2, 1.12], az.label, 'ax');
+      const labels = [];
+      const addLabel = (pt, text, cls = 'm', anchor = 'middle') => {
+        const q = P(pt);
+        labels.push({ x: q.sx, y: q.sy, text: String(text), cls, anchor });
+      };
+      ax.ticks.forEach(t => addLabel([t.pos, sy * 1.14, -1.08], t.text));
+      ay.ticks.forEach(t => addLabel([sx * 1.14, t.pos, -1.08], t.text));
+      az.ticks.forEach(t => addLabel([corner[0] * 1.1, corner[1] * 1.1, t.pos], t.text, 'm', 'end'));
+      addLabel([0, sy * 1.45, -1.2], ax.label, 'ax');
+      addLabel([sx * 1.5, 0, -1.2], ay.label, 'ax');
+      addLabel([corner[0] * 1.2, corner[1] * 1.2, 1.12], az.label, 'ax');
+      labelLayer.selectAll('text').data(labels).join('text')
+        .attr('class', d => d.cls)
+        .attr('x', d => d.x)
+        .attr('y', d => d.y)
+        .attr('text-anchor', d => d.anchor)
+        .attr('dominant-baseline', 'middle')
+        .text(d => d.text);
 
-      const items = [];
+      const grid = [];
       if (st.mode === 'grid') {
         const G = lift.meta.grid;
         for (let i = 0; i < G.length - 1; i++) for (let j = 0; j < G[0].length - 1; j++) {
           const q = [G[i][j], G[i + 1][j], G[i + 1][j + 1], G[i][j + 1]], pr = q.map(p => P(p.pos));
-          items.push({ d: d3.mean(pr, p => p.depth), s: `<polygon points="${pr.map(p => p.sx.toFixed(1) + ',' + p.sy.toFixed(1)).join(' ')}" fill="${col.val(d3.mean(q, p => p.value))}" fill-opacity=".88" stroke="var(--bg)" stroke-width=".6"/>` });
+          grid.push({
+            depth: d3.mean(pr, p => p.depth),
+            points: pr.map(p => [p.sx.toFixed(1), p.sy.toFixed(1)].join(',')).join(' '),
+            value: d3.mean(q, p => p.value)
+          });
         }
       }
-      lift.points.forEach(p => {
-        const q = P(p.pos), r = (st.mode === 'grid' ? 2.2 : sc ? sc(+p.row[st.size]) : 4.5) * q.f;
-        let s = '';
-        if (st.drop && st.mode !== 'grid') { const b = P([p.pos[0], p.pos[1], -1]); s += `<line x1="${q.sx}" y1="${q.sy}" x2="${b.sx}" y2="${b.sy}" stroke="${col.f(p)}" stroke-opacity=".3"/>`; }
-        const tip = Object.entries(p.row).map(([k, v]) => `${k}: ${v}`).join('\n');
-        s += `<circle cx="${q.sx.toFixed(1)}" cy="${q.sy.toFixed(1)}" r="${r.toFixed(2)}" fill="${col.f(p)}" fill-opacity=".9" stroke="var(--bg)" stroke-width=".7"><title>${esc(tip)}</title></circle>`;
-        items.push({ d: q.depth, s });
-      });
-      items.sort((a, b) => b.d - a.d).forEach(it => out += it.s);
+      grid.sort((a, b) => b.depth - a.depth);
+      gridLayer.selectAll('polygon').data(grid).join('polygon')
+        .attr('points', d => d.points)
+        .attr('fill', d => col.val(d.value))
+        .attr('fill-opacity', .88)
+        .attr('stroke', 'var(--bg)')
+        .attr('stroke-width', .6);
 
-      if (col.cat) col.cat.forEach(([n, c], i) => out += `<circle cx="18" cy="${24 + i * 16}" r="5" fill="${c}"/><text class="t" x="28" y="${24 + i * 16}" dominant-baseline="middle">${esc(n)}</text>`);
-      out += `<text class="m" x="14" y="${col.cat ? 24 + col.cat.length * 16 + 6 : 18}">${col.cat ? '' : esc(col.label)}</text>`;
-      if (st.mode === 'pca') out += `<text class="m" x="${W - 14}" y="18" text-anchor="end">top 3 components keep ${Math.round(d3.sum(lift.meta.explained) * 100)}% of variance</text>`;
-      svg.html(out);
+      const pointItems = lift.points.map(p => ({
+        key: st.mode === 'grid' ? `${p.i}:${p.j}` : String(p.i),
+        point: p,
+        projected: P(p.pos),
+        radius: (st.mode === 'grid' ? 2.2 : sc ? sc(+p.row[st.size]) : 4.5) * P(p.pos).f,
+        tip: Object.entries(p.row).map(([k, v]) => `${k}: ${v}`).join('\n')
+      })).sort((a, b) => b.projected.depth - a.projected.depth);
+
+      const dropItems = st.drop && st.mode !== 'grid' ? pointItems.map(d => {
+        const b = P([d.point.pos[0], d.point.pos[1], -1]);
+        return { key: d.key, point: d.point, projected: d.projected, base: b };
+      }) : [];
+      dropLayer.selectAll('line').data(dropItems, d => d.key).join('line')
+        .attr('x1', d => d.projected.sx)
+        .attr('y1', d => d.projected.sy)
+        .attr('x2', d => d.base.sx)
+        .attr('y2', d => d.base.sy)
+        .attr('stroke', d => col.f(d.point))
+        .attr('stroke-opacity', .3);
+
+      const points = pointLayer.selectAll('circle.point')
+        .data(pointItems, d => d.key);
+      const entered = points.enter().append('circle').attr('class', 'point');
+      entered.append('title');
+      entered.merge(points)
+        .attr('cx', d => d.projected.sx.toFixed(1))
+        .attr('cy', d => d.projected.sy.toFixed(1))
+        .attr('r', d => d.radius.toFixed(2))
+        .attr('fill', d => col.f(d.point))
+        .attr('fill-opacity', .9)
+        .attr('stroke', 'var(--bg)')
+        .attr('stroke-width', .7);
+      entered.merge(points).select('title').text(d => d.tip);
+      points.exit().remove();
+
+      const legendItems = col.cat || [];
+      legendLayer.selectAll('g.legend-item').data(legendItems).join(
+        enter => {
+          const item = enter.append('g').attr('class', 'legend-item');
+          item.append('circle').attr('r', 5);
+          item.append('text').attr('class', 't').attr('x', 10).attr('dominant-baseline', 'middle');
+          return item;
+        }
+      )
+        .attr('transform', (d, i) => `translate(18,${24 + i * 16})`);
+      legendLayer.selectAll('g.legend-item circle').data(legendItems)
+        .attr('fill', d => d[1]);
+      legendLayer.selectAll('g.legend-item text').data(legendItems)
+        .text(d => d[0]);
+
+      legendLayer.selectAll('text.legend-label').data([col.cat ? '' : col.label]).join('text')
+        .attr('class', 'm legend-label')
+        .attr('x', 14)
+        .attr('y', col.cat ? 24 + col.cat.length * 16 + 6 : 18)
+        .text(d => d);
+
+      legendLayer.selectAll('text.pca-label').data(st.mode === 'pca' ? [lift.meta.explained] : []).join('text')
+        .attr('class', 'm pca-label')
+        .attr('x', W - 14)
+        .attr('y', 18)
+        .attr('text-anchor', 'end')
+        .text(d => `top 3 components keep ${Math.round(d3.sum(d) * 100)}% of variance`);
     }
 
     function relift() { cols = L.columns(data); lift = L.lift(data, st); draw(); }
