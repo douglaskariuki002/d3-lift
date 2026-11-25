@@ -7,6 +7,7 @@ A small D3-powered demo that lifts tabular data into 3D space and projects it ba
 - `d3-lift.html` — the demo page and UI shell
 - `lif3d.js` — reusable Lift3D library
 - `demo.js` — sample data and event wiring for the page
+- `styles/d3-lift.css` — demo page styles
 
 ## What it does
 
